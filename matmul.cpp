@@ -169,6 +169,53 @@ void matmul_switched_micro(matrix* Left, matrix* Right, matrix* Result) {
 }
 
 
+void matmul_switched_micro_256(matrix* Left, matrix* Right, matrix* Result) {
+  TIME_FUNC();
+
+  float* L = Left->Buffer;
+  float* R = Right->Buffer;
+  float* F = Result->Buffer;
+
+  unsigned int Col = Left->M;
+  unsigned int Common = Left->N;
+  unsigned int Row = Right->N;
+
+#define MICRO_DIM0 256
+#define MICRO_DIM1 8 
+
+  for (int k = 0; k < Row; k += MICRO_DIM0) {
+
+    for (int i = 0; i < Col; ++i) {
+      float Accum[MICRO_DIM0] = {};
+      float* F_row = F + i*Row;
+      float* L_row = L + i*Common;
+
+      for (int j = 0; j < Common; j += MICRO_DIM1) {
+
+        float L_val[MICRO_DIM1] = {};
+        for (int micro_j = 0; micro_j < MICRO_DIM1; ++micro_j) {
+          L_val[micro_j] = L_row[j + micro_j];
+        }
+
+        for (int micro_j = 0; micro_j < MICRO_DIM1; ++micro_j) {
+          float* R_row = R + (j + micro_j)*Row;
+          for (int micro_k = 0; micro_k < MICRO_DIM0; ++micro_k) {
+            Accum[micro_k] += L_val[micro_j] * R_row[k + micro_k]; 
+          }
+        }
+      }
+
+      for (int micro_j = 0; micro_j < MICRO_DIM1; ++micro_j) {
+        for (int micro_k = 0; micro_k < MICRO_DIM0; ++micro_k) {
+          F_row[k + micro_k] = Accum[micro_k];
+        }
+      }
+
+    }
+  }
+}
+
+
 void matmul_vanila(matrix* Left, matrix* Right, matrix* Result) {
   TIME_FUNC();
   float* L = Left->Buffer;
@@ -235,6 +282,9 @@ void printMatrix(matrix* M) {
   matmul_switched_micro(&Name##_A, &Name##_B, &Name##_C);\
   isMatrixIdentity(&Name##_C); \
   zeroMatrix(&Name##_C); \
+  matmul_switched_micro_256(&Name##_A, &Name##_B, &Name##_C);\
+  isMatrixIdentity(&Name##_C); \
+  zeroMatrix(&Name##_C); \
   PRINT_NL("==== End of validate ========");
 
 #define testMatmulGroup(Name) \
@@ -243,6 +293,7 @@ void printMatrix(matrix* M) {
   matmul_switched2(&Name##_A, &Name##_B, &Name##_C);\
   matmul_switched3(&Name##_A, &Name##_B, &Name##_C);\
   matmul_switched_micro(&Name##_A, &Name##_B, &Name##_C);\
+  matmul_switched_micro_256(&Name##_A, &Name##_B, &Name##_C);\
   PRINT_NL("==== End of test ============");
 
 int main(int argc, char** argv) {
@@ -252,9 +303,9 @@ int main(int argc, char** argv) {
 
   TIME(main);
   Arena = arenaAllocatorCreate(2E9);
-  createMatmulGroup(Test, MICRO_SIZE*4, MICRO_SIZE*2, MICRO_SIZE*2);
+  createMatmulGroup(Test, MICRO_SIZE*1, MICRO_SIZE*1, MICRO_SIZE*1);
   validateMatmulGroup(Test);
 
-  createMatmulGroup(Perf, MICRO_SIZE*4, MICRO_SIZE*8, MICRO_SIZE*4);
+  createMatmulGroup(Perf, MICRO_SIZE*8, MICRO_SIZE*8, MICRO_SIZE*4);
   testMatmulGroup(Perf);
 }
